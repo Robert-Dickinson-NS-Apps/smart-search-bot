@@ -510,7 +510,7 @@ function AuditedMarkdown({
     return m;
   }, [sentences]);
 
-  const timeoutRef = useRef<number | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activePreviewRef = useRef<number | null>(null);
   const schedulePreview = (idx: number) => {
     if (!hoverPreviewEnabled) return;
@@ -614,6 +614,8 @@ function splitText(
   activeRef: number | null,
   setActiveRef: (n: number | null) => void,
   brokenIds: Set<number>,
+  schedulePreview: (idx: number) => void,
+  clearPreview: () => void,
   nextKey: () => number,
 ): React.ReactNode[] {
   const sentenceRe = /[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g;
