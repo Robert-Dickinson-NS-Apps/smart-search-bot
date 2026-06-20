@@ -656,22 +656,22 @@ function splitText(
         tabIndex={flagged ? 0 : undefined}
         onMouseEnter={
           hasRefs
-            ? () => previewSentenceCitations(audit.index)
+            ? () => schedulePreview(audit.index)
             : undefined
         }
         onMouseLeave={
           hasRefs
-            ? () => clearSentencePreview(audit.index)
+            ? () => clearPreview()
             : undefined
         }
         onFocus={
           flagged && audit
-            ? () => previewSentenceCitations(audit.index)
+            ? () => schedulePreview(audit.index)
             : undefined
         }
         onBlur={
           flagged && audit
-            ? () => clearSentencePreview(audit.index)
+            ? () => clearPreview()
             : undefined
         }
         onClick={
