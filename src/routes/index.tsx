@@ -499,7 +499,6 @@ function renderInline(
   setActiveRef: (n: number | null) => void,
   brokenIds: Set<number>,
 ): React.ReactNode {
-  // Walk children; for plain text, split into sentences and citation pills.
   const out: React.ReactNode[] = [];
   let key = 0;
   const handle = (node: React.ReactNode) => {
@@ -515,6 +514,26 @@ function renderInline(
   return out;
 }
 
+function jumpToSentenceCitations(
+  sentenceIdx: number,
+  firstRef: number | null,
+  setActiveRef: (n: number | null) => void,
+) {
+  if (firstRef !== null) setActiveRef(firstRef);
+  requestAnimationFrame(() => {
+    const pills = document.querySelectorAll<HTMLElement>(
+      `[data-sentence-idx="${sentenceIdx}"].cite-ref`,
+    );
+    if (!pills.length) return;
+    pills[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    pills.forEach((p) => {
+      p.classList.remove("cite-flash");
+      void p.offsetWidth;
+      p.classList.add("cite-flash");
+    });
+  });
+}
+
 function splitText(
   text: string,
   lookup: Map<string, SentenceAudit>,
@@ -523,7 +542,6 @@ function splitText(
   brokenIds: Set<number>,
   nextKey: () => number,
 ): React.ReactNode[] {
-  // Sentence boundaries
   const sentenceRe = /[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g;
   const out: React.ReactNode[] = [];
   let m: RegExpExecArray | null;
@@ -541,13 +559,44 @@ function splitText(
           : audit?.status === "broken_link"
             ? "audit-sentence audit-broken-link"
             : "audit-sentence audit-ok";
+    const flagged = !!audit && audit.status !== "ok";
+    const refs = audit?.cited_refs ?? [];
+    const firstRef = refs[0] ?? null;
+    const tip = audit
+      ? (audit.reason ?? "Supported") +
+        (flagged
+          ? refs.length
+            ? ` — click to jump to [${refs.join("] [")}]`
+            : " — no inline citations"
+          : "")
+      : undefined;
     out.push(
       <span
         key={nextKey()}
-        className={cls}
-        title={audit?.reason ?? (audit ? "Supported" : undefined)}
+        className={cls + (flagged ? " audit-clickable" : "")}
+        title={tip}
+        role={flagged ? "button" : undefined}
+        tabIndex={flagged ? 0 : undefined}
+        onClick={
+          flagged && audit
+            ? (e) => {
+                e.stopPropagation();
+                jumpToSentenceCitations(audit.index, firstRef, setActiveRef);
+              }
+            : undefined
+        }
+        onKeyDown={
+          flagged && audit
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  jumpToSentenceCitations(audit.index, firstRef, setActiveRef);
+                }
+              }
+            : undefined
+        }
       >
-        {renderCitations(raw, activeRef, setActiveRef, brokenIds, nextKey)}
+        {renderCitations(raw, audit?.index ?? null, activeRef, setActiveRef, brokenIds, nextKey)}
       </span>,
     );
     lastIdx = m.index + raw.length;
@@ -558,6 +607,7 @@ function splitText(
 
 function renderCitations(
   text: string,
+  sentenceIdx: number | null,
   activeRef: number | null,
   setActiveRef: (n: number | null) => void,
   brokenIds: Set<number>,
@@ -574,6 +624,8 @@ function renderCitations(
     out.push(
       <span
         key={nextKey()}
+        data-sentence-idx={sentenceIdx ?? undefined}
+        data-cite-n={n}
         className={`cite-ref ${activeRef === n ? "cite-active" : ""} ${broken ? "cite-broken" : ""}`}
         onClick={(e) => {
           e.stopPropagation();
