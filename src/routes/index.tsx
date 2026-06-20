@@ -584,6 +584,7 @@ function splitText(
             : " — no inline citations"
           : "")
       : undefined;
+    const hasRefs = refs.length > 0 && audit != null;
     out.push(
       <span
         key={nextKey()}
@@ -591,6 +592,26 @@ function splitText(
         title={tip}
         role={flagged ? "button" : undefined}
         tabIndex={flagged ? 0 : undefined}
+        onMouseEnter={
+          hasRefs
+            ? () => previewSentenceCitations(audit.index)
+            : undefined
+        }
+        onMouseLeave={
+          hasRefs
+            ? () => clearSentencePreview(audit.index)
+            : undefined
+        }
+        onFocus={
+          flagged && audit
+            ? () => previewSentenceCitations(audit.index)
+            : undefined
+        }
+        onBlur={
+          flagged && audit
+            ? () => clearSentencePreview(audit.index)
+            : undefined
+        }
         onClick={
           flagged && audit
             ? (e) => {
