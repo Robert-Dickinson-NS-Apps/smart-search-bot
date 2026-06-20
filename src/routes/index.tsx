@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -79,6 +81,8 @@ function Index() {
   const [validation, setValidation] = useState<ValidationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeRef, setActiveRef] = useState<number | null>(null);
+  const [hoverPreviewEnabled, setHoverPreviewEnabled] = useState(true);
+  const [hoverDelayMs, setHoverDelayMs] = useState(150);
   const abortRef = useRef<AbortController | null>(null);
 
   async function run() {
@@ -303,6 +307,8 @@ function Index() {
                     activeRef={activeRef}
                     setActiveRef={setActiveRef}
                     brokenIds={brokenIds}
+                    hoverPreviewEnabled={hoverPreviewEnabled}
+                    hoverDelayMs={hoverDelayMs}
                   />
                 ) : (
                   <div className="markdown-body text-sm leading-relaxed">
