@@ -355,7 +355,7 @@ function Index() {
             <div className="flex items-center gap-2 mb-4 text-sm font-semibold">
               <FileText className="h-4 w-4" /> Report
             </div>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            <div className="markdown-body text-sm leading-relaxed space-y-3">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
             </div>
           </Card>
