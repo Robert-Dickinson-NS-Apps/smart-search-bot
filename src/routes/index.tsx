@@ -239,6 +239,33 @@ function Index() {
                 ))}
               </RadioGroup>
             </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="preview-toggle" className="text-sm font-medium">Citation hover previews</Label>
+                <Switch
+                  id="preview-toggle"
+                  checked={hoverPreviewEnabled}
+                  onCheckedChange={setHoverPreviewEnabled}
+                />
+              </div>
+              {hoverPreviewEnabled && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-muted-foreground">Hover delay</Label>
+                    <span className="text-xs font-mono">{hoverDelayMs}ms</span>
+                  </div>
+                  <Slider
+                    value={[hoverDelayMs]}
+                    onValueChange={(v) => setHoverDelayMs(v[0])}
+                    min={0}
+                    max={1000}
+                    step={50}
+                    className="mt-2"
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </Card>
 
@@ -465,12 +492,16 @@ function AuditedMarkdown({
   activeRef,
   setActiveRef,
   brokenIds,
+  hoverPreviewEnabled,
+  hoverDelayMs,
 }: {
   markdown: string;
   sentences: SentenceAudit[];
   activeRef: number | null;
   setActiveRef: (n: number | null) => void;
   brokenIds: Set<number>;
+  hoverPreviewEnabled: boolean;
+  hoverDelayMs: number;
 }) {
   // Map: sentence text → audit (best-effort exact-match; sentences are unique enough)
   const lookup = useMemo(() => {
@@ -479,16 +510,37 @@ function AuditedMarkdown({
     return m;
   }, [sentences]);
 
+  const timeoutRef = useRef<number | null>(null);
+  const activePreviewRef = useRef<number | null>(null);
+  const schedulePreview = (idx: number) => {
+    if (!hoverPreviewEnabled) return;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      previewSentenceCitations(idx);
+      activePreviewRef.current = idx;
+    }, hoverDelayMs);
+  };
+  const clearPreview = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (activePreviewRef.current !== null) {
+      clearSentencePreview(activePreviewRef.current);
+      activePreviewRef.current = null;
+    }
+  };
+
   return (
     <div className="markdown-body text-sm leading-relaxed">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children }) => (
-            <p>{renderInline(children, lookup, activeRef, setActiveRef, brokenIds)}</p>
+            <p>{renderInline(children, lookup, activeRef, setActiveRef, brokenIds, schedulePreview, clearPreview)}</p>
           ),
           li: ({ children }) => (
-            <li>{renderInline(children, lookup, activeRef, setActiveRef, brokenIds)}</li>
+            <li>{renderInline(children, lookup, activeRef, setActiveRef, brokenIds, schedulePreview, clearPreview)}</li>
           ),
         }}
       >
@@ -504,12 +556,14 @@ function renderInline(
   activeRef: number | null,
   setActiveRef: (n: number | null) => void,
   brokenIds: Set<number>,
+  schedulePreview: (idx: number) => void,
+  clearPreview: () => void,
 ): React.ReactNode {
   const out: React.ReactNode[] = [];
   let key = 0;
   const handle = (node: React.ReactNode) => {
     if (typeof node === "string") {
-      out.push(...splitText(node, lookup, activeRef, setActiveRef, brokenIds, () => key++));
+      out.push(...splitText(node, lookup, activeRef, setActiveRef, brokenIds, schedulePreview, clearPreview, () => key++));
     } else if (Array.isArray(node)) {
       node.forEach(handle);
     } else {
