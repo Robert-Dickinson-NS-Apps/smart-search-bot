@@ -1,6 +1,7 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { createLovableAiGatewayProvider } from "./ai-gateway.server";
+import { perplexityRetrieve } from "./perplexity.server";
 
 export type Source = {
   id: number;
@@ -10,6 +11,14 @@ export type Source = {
   retrieved_at: string;
   reachable?: boolean;
   http_status?: number;
+};
+
+export type SentenceAudit = {
+  index: number;
+  text: string;
+  cited_refs: number[];
+  status: "ok" | "unsupported" | "missing_ref" | "broken_link";
+  reason?: string;
 };
 
 export type ProgressEvent =
@@ -25,44 +34,12 @@ export type ValidationReport = {
   total_citations: number;
   reachable_count: number;
   broken_links: { id: number; url: string; status: number | string }[];
-  missing_refs: number[]; // [n] used in text but no matching source
+  missing_refs: number[];
   unsupported_claims: { sentence: string; reason: string }[];
+  sentences: SentenceAudit[];
 };
 
 export type Strategy = "quick" | "standard" | "deep";
-
-const SWMM_SOURCES = [
-  {
-    url: "https://www.epa.gov/water-research/storm-water-management-model-swmm",
-    title: "EPA Storm Water Management Model (SWMM) — Official Page",
-    snippet:
-      "EPA SWMM is a dynamic rainfall-runoff simulation model used for single-event or long-term simulation of runoff quantity and quality from primarily urban areas.",
-  },
-  {
-    url: "https://www.openswmm.org/",
-    title: "Open SWMM — Community Knowledge Base",
-    snippet:
-      "OpenSWMM aggregates SWMM5 user knowledge: forum threads, modeling tips, parameter guidance, and discussions of LID, hydrology, hydraulics and water quality.",
-  },
-  {
-    url: "https://pyswmm.github.io/pyswmm/",
-    title: "PySWMM Documentation",
-    snippet:
-      "PySWMM is the Python wrapper for the EPA SWMM5 toolkit, exposing nodes, links, subcatchments, simulation control and the OWA Toolkit API.",
-  },
-  {
-    url: "https://github.com/USEPA/Stormwater-Management-Model",
-    title: "USEPA/Stormwater-Management-Model — Source",
-    snippet:
-      "Canonical SWMM5 C source code, including hydraulics, hydrology, water-quality and dynamic-wave routing modules. Useful for grounding equations and error codes.",
-  },
-  {
-    url: "https://www.chiwater.com/Files/SWMM5_Reference_Manual_Vol_I_Hydrology.pdf",
-    title: "SWMM5 Reference Manual Vol. I — Hydrology",
-    snippet:
-      "Authoritative description of SWMM5 hydrology: subcatchment runoff, infiltration (Horton, Green-Ampt, Curve Number), snowmelt, and groundwater modules.",
-  },
-];
 
 function getModel() {
   const key = process.env.LOVABLE_API_KEY;
@@ -85,26 +62,12 @@ export async function planResearch(query: string, strategy: Strategy): Promise<s
   return output.sub_questions.slice(0, targetCount);
 }
 
-// ─── Stage 2: Retrieve (MOCK — wire Perplexity later) ───────────────────────
-export async function retrieveSourcesMock(
+// ─── Stage 2: Retrieve via Perplexity sonar-pro ─────────────────────────────
+export async function retrieveSources(
   questions: string[],
   query: string,
 ): Promise<Source[]> {
-  // Mock retrieval: return canonical SWMM5 sources with a query-tagged snippet.
-  // TODO: replace with Perplexity sonar-pro call (see /lib/perplexity.server.ts).
-  const now = new Date().toISOString();
-  const picks = strategyPick(SWMM_SOURCES, questions.length + 2);
-  return picks.map((s, i) => ({
-    id: i + 1,
-    url: s.url,
-    title: s.title,
-    snippet: `[MOCK] ${s.snippet} — relevant to: "${query}"`,
-    retrieved_at: now,
-  }));
-}
-
-function strategyPick<T>(arr: T[], n: number): T[] {
-  return arr.slice(0, Math.min(n, arr.length));
+  return perplexityRetrieve(questions, query);
 }
 
 // ─── Reachability check ─────────────────────────────────────────────────────
@@ -155,50 +118,122 @@ Rules:
   return text;
 }
 
-// ─── Stage 4: Validate citations & claims ───────────────────────────────────
+// ─── Stage 4: Validate citations & per-sentence audit ───────────────────────
+
+// Extract sentences from prose blocks of the markdown (skip headings/lists/code).
+function extractSentences(markdown: string): { text: string; offset: number }[] {
+  const out: { text: string; offset: number }[] = [];
+  const lines = markdown.split("\n");
+  let inCode = false;
+  let cursor = 0;
+  for (const line of lines) {
+    const lineStart = cursor;
+    cursor += line.length + 1;
+    if (line.trim().startsWith("```")) {
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) continue;
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^#{1,6}\s/.test(trimmed)) continue;
+    if (/^[-*+]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) continue;
+    if (/^\|/.test(trimmed)) continue;
+
+    // Sentence split on .!? followed by space/EOL
+    const re = /[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      const text = m[0].trim();
+      if (text.length < 20) continue; // skip stubs
+      out.push({ text, offset: lineStart + m.index });
+    }
+  }
+  return out;
+}
+
 export async function validateReport(
   markdown: string,
   sources: Source[],
 ): Promise<ValidationReport> {
-  // Find all [n] refs in the body
   const refs = Array.from(markdown.matchAll(/\[(\d+)\]/g)).map((m) => Number(m[1]));
-  const uniqueRefs = Array.from(new Set(refs));
   const sourceIds = new Set(sources.map((s) => s.id));
+  const brokenIds = new Set(
+    sources.filter((s) => s.reachable === false).map((s) => s.id),
+  );
+  const uniqueRefs = Array.from(new Set(refs));
   const missing_refs = uniqueRefs.filter((n) => !sourceIds.has(n));
 
   const broken_links = sources
     .filter((s) => s.reachable === false)
     .map((s) => ({ id: s.id, url: s.url, status: s.http_status ?? "network_error" }));
 
-  // Use the model to spot unsupported claims (sentences w/ no citation)
-  let unsupported_claims: ValidationReport["unsupported_claims"] = [];
+  // Per-sentence baseline classification
+  const sentences = extractSentences(markdown);
+  const baseline: SentenceAudit[] = sentences.map((s, i) => {
+    const cited = Array.from(s.text.matchAll(/\[(\d+)\]/g)).map((m) => Number(m[1]));
+    let status: SentenceAudit["status"] = "ok";
+    let reason: string | undefined;
+    if (cited.length === 0) {
+      // hedged / unverified prefix is fine
+      if (!/unverified[: ]/i.test(s.text)) {
+        status = "unsupported";
+        reason = "No inline [n] citation";
+      }
+    } else {
+      const missing = cited.filter((n) => !sourceIds.has(n));
+      const broken = cited.filter((n) => brokenIds.has(n));
+      if (missing.length) {
+        status = "missing_ref";
+        reason = `Cites [${missing.join(", ")}] but no such source was retrieved`;
+      } else if (broken.length) {
+        status = "broken_link";
+        reason = `Cites [${broken.join(", ")}] which is unreachable`;
+      }
+    }
+    return { index: i, text: s.text, cited_refs: cited, status, reason };
+  });
+
+  // Ask the model to upgrade verdicts: claims with citations that don't actually
+  // support them get bumped to "unsupported".
+  let llmFlags: { index: number; reason: string }[] = [];
   try {
     const { output } = await generateText({
       model: getModel(),
       output: Output.object({
         schema: z.object({
-          unsupported: z
-            .array(
-              z.object({
-                sentence: z.string(),
-                reason: z.string(),
-              }),
-            )
-            .max(10),
+          flags: z
+            .array(z.object({ index: z.number(), reason: z.string() }))
+            .max(15),
         }),
       }),
-      prompt: `Audit this markdown research report. List up to 10 sentences that make factual claims but have NO inline [n] citation, OR cite a source that does not plausibly support the claim. Skip headings, list scaffolding, and clearly hedged statements ("Unverified:" prefix is allowed).
+      prompt: `Audit each sentence below. Return up to 15 sentence indices where the cited [n] sources do NOT plausibly support the factual claim. Skip sentences with no citation (already flagged), and skip sentences prefixed with "Unverified:".
 
-Sources available:
+Sources:
 ${sources.map((s) => `[${s.id}] ${s.title}: ${s.snippet}`).join("\n")}
 
-Report:
-${markdown}`,
+Sentences:
+${baseline
+  .filter((b) => b.cited_refs.length > 0)
+  .map((b) => `#${b.index} (cites ${b.cited_refs.join(",")}): ${b.text}`)
+  .join("\n")}`,
     });
-    unsupported_claims = output.unsupported;
+    llmFlags = output.flags;
   } catch {
     // best-effort
   }
+
+  for (const f of llmFlags) {
+    const s = baseline[f.index];
+    if (s && s.status === "ok") {
+      s.status = "unsupported";
+      s.reason = f.reason;
+    }
+  }
+
+  const unsupported_claims = baseline
+    .filter((b) => b.status === "unsupported")
+    .map((b) => ({ sentence: b.text, reason: b.reason ?? "Unsupported" }));
 
   return {
     total_citations: refs.length,
@@ -206,5 +241,6 @@ ${markdown}`,
     broken_links,
     missing_refs,
     unsupported_claims,
+    sentences: baseline,
   };
 }

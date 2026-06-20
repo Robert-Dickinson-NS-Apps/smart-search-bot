@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import {
   planResearch,
-  retrieveSourcesMock,
+  retrieveSources,
   synthesizeReport,
   validateReport,
   verifySource,
@@ -36,33 +36,31 @@ export const Route = createFileRoute("/api/research")({
               controller.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
 
             try {
-              // Stage 1
               send({ kind: "stage", stage: "plan", message: "Planning sub-questions…" });
               const questions = await planResearch(query, strategy);
               send({ kind: "plan", questions });
 
-              // Stage 2
               send({
                 kind: "stage",
                 stage: "retrieve",
-                message: `Retrieving sources (mock — wire Perplexity to enable live search)…`,
+                message: "Retrieving sources via Perplexity sonar-pro…",
               });
-              const raw = await retrieveSourcesMock(questions, query);
+              const raw = await retrieveSources(questions, query);
 
-              // Verify each source reachable
               const verified: Source[] = [];
-              for (const s of raw) {
-                const v = await verifySource(s);
-                verified.push(v);
-                send({ kind: "source", source: v });
-              }
+              await Promise.all(
+                raw.map(async (s) => {
+                  const v = await verifySource(s);
+                  verified.push(v);
+                  send({ kind: "source", source: v });
+                }),
+              );
+              verified.sort((a, b) => a.id - b.id);
 
-              // Stage 3
               send({ kind: "stage", stage: "synthesize", message: "Synthesizing report…" });
               const markdown = await synthesizeReport(query, questions, verified);
               send({ kind: "section", title: "Report", markdown });
 
-              // Stage 4
               send({ kind: "stage", stage: "validate", message: "Validating citations…" });
               const validation = await validateReport(markdown, verified);
               send({ kind: "validation", report: validation });
