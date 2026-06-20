@@ -534,6 +534,20 @@ function jumpToSentenceCitations(
   });
 }
 
+function previewSentenceCitations(sentenceIdx: number) {
+  const pills = document.querySelectorAll<HTMLElement>(
+    `[data-sentence-idx="${sentenceIdx}"].cite-ref`,
+  );
+  pills.forEach((p) => p.classList.add("cite-preview"));
+}
+
+function clearSentencePreview(sentenceIdx: number) {
+  const pills = document.querySelectorAll<HTMLElement>(
+    `[data-sentence-idx="${sentenceIdx}"].cite-ref`,
+  );
+  pills.forEach((p) => p.classList.remove("cite-preview"));
+}
+
 function splitText(
   text: string,
   lookup: Map<string, SentenceAudit>,
