@@ -534,6 +534,20 @@ function jumpToSentenceCitations(
   });
 }
 
+function previewSentenceCitations(sentenceIdx: number) {
+  const pills = document.querySelectorAll<HTMLElement>(
+    `[data-sentence-idx="${sentenceIdx}"].cite-ref`,
+  );
+  pills.forEach((p) => p.classList.add("cite-preview"));
+}
+
+function clearSentencePreview(sentenceIdx: number) {
+  const pills = document.querySelectorAll<HTMLElement>(
+    `[data-sentence-idx="${sentenceIdx}"].cite-ref`,
+  );
+  pills.forEach((p) => p.classList.remove("cite-preview"));
+}
+
 function splitText(
   text: string,
   lookup: Map<string, SentenceAudit>,
@@ -570,6 +584,7 @@ function splitText(
             : " — no inline citations"
           : "")
       : undefined;
+    const hasRefs = refs.length > 0 && audit != null;
     out.push(
       <span
         key={nextKey()}
@@ -577,6 +592,26 @@ function splitText(
         title={tip}
         role={flagged ? "button" : undefined}
         tabIndex={flagged ? 0 : undefined}
+        onMouseEnter={
+          hasRefs
+            ? () => previewSentenceCitations(audit.index)
+            : undefined
+        }
+        onMouseLeave={
+          hasRefs
+            ? () => clearSentencePreview(audit.index)
+            : undefined
+        }
+        onFocus={
+          flagged && audit
+            ? () => previewSentenceCitations(audit.index)
+            : undefined
+        }
+        onBlur={
+          flagged && audit
+            ? () => clearSentencePreview(audit.index)
+            : undefined
+        }
         onClick={
           flagged && audit
             ? (e) => {

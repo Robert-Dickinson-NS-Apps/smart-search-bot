@@ -180,3 +180,12 @@
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .cite-ref.cite-flash { animation: citeFlash 1.1s ease-out 2; }
+.cite-preview {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-primary) 25%, transparent);
+  transition: all 0.15s ease;
+}
+
+
